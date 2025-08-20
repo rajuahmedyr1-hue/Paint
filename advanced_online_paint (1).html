@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Advanced Online Paint</title>
+  <style>
+    body{margin:0;font-family:sans-serif;background:#f5f5f5}
+    #toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:10px;background:#ffffff;border-bottom:1px solid #ddd}
+    #toolbar button{padding:6px 10px;border:1px solid #ccc;border-radius:4px;cursor:pointer}
+    #canvasContainer{overflow:auto;width:100%;height:calc(100vh - 60px);display:flex;justify-content:center;align-items:center;background:#fff}
+    canvas{border:1px solid #ccc;}
+  </style>
+</head>
+<body>
+  <div id="toolbar">
+    <button id="brushTool">Brush</button>
+    <button id="eraserTool">Eraser</button>
+    <button id="rectTool">Rectangle</button>
+    <button id="circleTool">Circle</button>
+    <button id="lineTool">Line</button>
+    <input type="number" id="brushSize" value="5" min="1" max="50">
+    <input type="color" id="colorPicker" value="#000000">
+    <button id="undoBtn">Undo</button>
+    <button id="redoBtn">Redo</button>
+    <button id="clearBtn">Clear</button>
+
+    <!-- Save/Load buttons -->
+    <button id="savePngBtn">Save PNG</button>
+    <button id="saveJpgBtn">Save JPG</button>
+    <button id="saveJsonBtn">Save Project</button>
+    <button id="loadJsonBtn">Load Project</button>
+    <input type="file" id="fileInput" accept=".json" style="display:none">
+
+    <button id="zoomInBtn">Zoom +</button>
+    <button id="zoomOutBtn">Zoom -</button>
+  </div>
+  <div id="canvasContainer">
+    <canvas id="canvas" width="1200" height="700"></canvas>
+  </div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+let painting = false;
+let tool = 'brush';
+let startX, startY;
+let history = [], historyStep = -1;
+let scale = 1;
+
+function timestamp(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}_${String(d.getHours()).padStart(2,'0')}${String(d.getMinutes()).padStart(2,'0')}${String(d.getSeconds()).padStart(2,'0')}`;
+}
+
+function saveState(){
+  history = history.slice(0, historyStep + 1);
+  history.push(canvas.toDataURL());
+  historyStep++;
+  autoSave(); // auto save to localStorage
+}
+
+function undo(){
+  if(historyStep > 0){
+    historyStep--;
+    loadFromDataURL(history[historyStep]);
+    autoSave();
+  }
+}
+
+function redo(){
+  if(historyStep < history.length - 1){
+    historyStep++;
+    loadFromDataURL(history[historyStep]);
+    autoSave();
+  }
+}
+
+function setTool(t){ tool = t; }
+
+function start(e){
+  painting = true; 
+  saveState(); 
+  const rect = canvas.getBoundingClientRect();
+  startX = (e.clientX || e.touches[0].clientX) - rect.left;
+  startY = (e.clientY || e.touches[0].clientY) - rect.top;
+  if(tool === 'brush' || tool === 'eraser'){ draw(e); }
+}
+
+function end(){
+  if(painting){
+    painting = false;
+    ctx.beginPath();
+  }
+}
+
+function draw(e){
+  if(!painting) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX || e.touches[0].clientX) - rect.left;
+  const y = (e.clientY || e.touches[0].clientY) - rect.top;
+  const size = document.getElementById('brushSize').value;
+  const color = document.getElementById('colorPicker').value;
+  ctx.lineWidth = size;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = (tool === 'eraser' ? '#FFFFFF' : color);
+  if(tool === 'brush' || tool === 'eraser'){
+    ctx.lineTo(x, y);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  }
+}
+
+function drawShape(e){
+  if(!painting) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX) - rect.left;
+  const y = (e.clientY) - rect.top;
+  const w = x - startX;
+  const h = y - startY;
+
+  loadFromDataURL(history[historyStep], ()=>{
+    ctx.strokeStyle = document.getElementById('colorPicker').value;
+    ctx.lineWidth = document.getElementById('brushSize').value;
+    if(tool === 'rect'){
+      ctx.strokeRect(startX, startY, w, h);
+    }
+    if(tool === 'circle'){
+      ctx.beginPath();
+      ctx.arc(startX, startY, Math.sqrt(w*w + h*h), 0, Math.PI*2);
+      ctx.stroke();
+    }
+    if(tool === 'line'){
+      ctx.beginPath();
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(x, y);
+      ctx.stroke();
+    }
+  });
+}
+
+function loadFromDataURL(dataURL, callback){
+  let img = new Image();
+  img.src = dataURL;
+  img.onload = ()=>{
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(img,0,0);
+    if(callback) callback();
+  };
+}
+
+canvas.addEventListener('mousedown', start);
+canvas.addEventListener('mouseup', end);
+canvas.addEventListener('mousemove', (e)=>{ 
+  if(['rect','circle','line'].includes(tool)){ drawShape(e); } 
+  else { draw(e); } 
+});
+canvas.addEventListener('touchstart', start);
+canvas.addEventListener('touchmove', draw);
+canvas.addEventListener('touchend', end);
+
+document.getElementById('brushTool').onclick = ()=>setTool('brush');
+document.getElementById('eraserTool').onclick = ()=>setTool('eraser');
+document.getElementById('rectTool').onclick = ()=>setTool('rect');
+document.getElementById('circleTool').onclick = ()=>setTool('circle');
+document.getElementById('lineTool').onclick = ()=>setTool('line');
+document.getElementById('undoBtn').onclick = undo;
+document.getElementById('redoBtn').onclick = redo;
+document.getElementById('clearBtn').onclick = ()=>{
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  saveState();
+};
+
+// Save PNG
+document.getElementById('savePngBtn').onclick = ()=>{
+  const link = document.createElement('a');
+  link.download = `drawing-${timestamp()}.png`;
+  link.href = canvas.toDataURL("image/png");
+  link.click();
+};
+
+// Save JPG
+document.getElementById('saveJpgBtn').onclick = ()=>{
+  const tempCanvas = document.createElement('canvas');
+  tempCanvas.width = canvas.width;
+  tempCanvas.height = canvas.height;
+  const tctx = tempCanvas.getContext('2d');
+  tctx.fillStyle = "#FFFFFF";
+  tctx.fillRect(0,0,tempCanvas.width,tempCanvas.height);
+  tctx.drawImage(canvas,0,0);
+  const link = document.createElement('a');
+  link.download = `drawing-${timestamp()}.jpg`;
+  link.href = tempCanvas.toDataURL("image/jpeg",0.9);
+  link.click();
+};
+
+// Save Project (JSON)
+document.getElementById('saveJsonBtn').onclick = ()=>{
+  const data = {
+    width: canvas.width,
+    height: canvas.height,
+    history: history,
+    historyStep
+  };
+  const blob = new Blob([JSON.stringify(data)], {type:"application/json"});
+  const link = document.createElement('a');
+  link.download = `project-${timestamp()}.json`;
+  link.href = URL.createObjectURL(blob);
+  link.click();
+};
+
+// Load Project (JSON)
+document.getElementById('loadJsonBtn').onclick = ()=>{
+  document.getElementById('fileInput').click();
+};
+
+document.getElementById('fileInput').addEventListener('change', (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = (evt)=>{
+    const data = JSON.parse(evt.target.result);
+    canvas.width = data.width;
+    canvas.height = data.height;
+    history = data.history;
+    historyStep = data.historyStep;
+    loadFromDataURL(history[historyStep]);
+    autoSave();
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById('zoomInBtn').onclick = ()=>{
+  scale *= 1.1;
+  canvas.style.transform = `scale(${scale})`;
+};
+document.getElementById('zoomOutBtn').onclick = ()=>{
+  scale *= 0.9;
+  canvas.style.transform = `scale(${scale})`;
+};
+
+// === Auto Save / Restore ===
+function autoSave(){
+  const data = {
+    width: canvas.width,
+    height: canvas.height,
+    history: history,
+    historyStep
+  };
+  localStorage.setItem("paintProject", JSON.stringify(data));
+}
+
+function autoRestore(){
+  const saved = localStorage.getItem("paintProject");
+  if(saved){
+    const data = JSON.parse(saved);
+    canvas.width = data.width;
+    canvas.height = data.height;
+    history = data.history;
+    historyStep = data.historyStep;
+    loadFromDataURL(history[historyStep]);
+  }
+}
+
+// Save initial blank state (only if nothing restored)
+if(!localStorage.getItem("paintProject")){
+  saveState();
+} else {
+  autoRestore();
+}
+</script>
+</body>
+</html>
